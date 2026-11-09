@@ -1,0 +1,60 @@
+﻿# Python generated files
+__pycache__/
+**/__pycache__/
+*.py[cod]
+.pytest_cache/
+.mypy_cache/
+.ruff_cache/
+
+# Virtual environments
+venv/
+.venv/
+ENV/
+
+# Secrets
+.env
+.env.*
+!.env.example
+
+# Local databases
+*.db
+*.sqlite
+*.sqlite3
+
+# Downloaded FFmpeg
+backend/ffmpeg-*/
+backend/__pycache__/ffmpeg/
+
+# Old backups
+backend/archive/
+
+# Next.js generated files
+frontend/node_modules/
+frontend/.next/
+frontend/out/
+frontend/.vercel/
+
+# Temporary files
+*.log
+.DS_Store
+Thumbs.db
+
+# Local-only test script
+/test_fixes.py
+
+frontend/node_modules/
+frontend/.next/
+**/.env
+**/.env.*
+!**/.env.example
+**/__pycache__/
+**/.pytest_cache/
+**/venv/
+**/.venv/
+**/node_modules/
+**/.next/
+**/*.py[cod]
+**/*.db
+**/*.sqlite
+**/*.sqlite3
+backend/ffmpeg-*/
