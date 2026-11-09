@@ -79,7 +79,31 @@ DATA_GOV_MAX_ATTEMPTS = 6
 PRICE_CACHE_SECONDS = max(60, int(os.getenv("PRICE_CACHE_SECONDS", "900")))
 PRICE_STALE_HOURS = max(1, int(os.getenv("PRICE_STALE_HOURS", "72")))
 
+# ---------------------------------------------------------------------------
+# Mandi price freshness and comparison settings
+# ---------------------------------------------------------------------------
 
+# Prices up to 3 days old are considered recent by default.
+# This default follows the existing 72-hour PRICE_STALE_HOURS setting.
+PRICE_FRESH_DAYS = max(
+    1,
+    int(os.getenv(
+        "PRICE_FRESH_DAYS",
+        str(max(1, (PRICE_STALE_HOURS + 23) // 24))
+    )),
+)
+
+# Older records can be displayed with an explicit age warning, up to 7 days.
+PRICE_MAX_DAYS = max(
+    PRICE_FRESH_DAYS,
+    int(os.getenv("PRICE_MAX_DAYS", "7")),
+)
+
+# Minimum number of distinct mandis required for a calculated median.
+PRICE_MIN_MANDIS = max(
+    1,
+    int(os.getenv("PRICE_MIN_MANDIS", "3")),
+)
 # ---------------------------------------------------------------------------
 # Database and demo settings
 # ---------------------------------------------------------------------------

@@ -1,0 +1,442 @@
+[
+  {
+    "commodity": "Wheat",
+    "district": "Nashik",
+    "A_app_style_with_sort": {
+      "total_reported": 35408,
+      "rows": 1000,
+      "min_date": "02/07/2026",
+      "max_date": "06/11/2026",
+      "age_days_of_newest": 3,
+      "sorted_desc": true,
+      "markets": [
+        "APMC Devala ",
+        "APMC Lasalgaon ",
+        "APMC Malegaon ",
+        "APMC Manmad ",
+        "APMC Nandgaon ",
+        "APMC Satana ",
+        "APMC Sinner ",
+        "APMC Yeola ",
+        "Devala APMC",
+        "Lasalgaon APMC",
+        "Lasalgaon(Niphad) ",
+        "Lasalgaon(Niphad) APMC",
+        "Lasalgaon(Vinchur) APMC",
+        "Malegaon APMC",
+        "Manmad APMC",
+        "Nandgaon APMC",
+        "Satana APMC",
+        "Shivsiddha Govind Producer Company Ltd Sanchalit Khajgi Krushi Utpann Bajar Samati-Abhona-Kalwan",
+        "Sinner APMC",
+        "Yeola APMC"
+      ],
+      "commodities": [
+        "Wheat"
+      ],
+      "unparsed_dates": 0
+    },
+    "B_no_sort": {
+      "total_reported": 35408,
+      "rows": 1000,
+      "min_date": "03/01/2004",
+      "max_date": "31/12/2020",
+      "age_days_of_newest": 2139,
+      "sorted_desc": false,
+      "markets": [
+        "Chandvad",
+        "Devala",
+        "Dindori(Vani)",
+        "Ghoti",
+        "Kalvan",
+        "Lasalgaon",
+        "Lasalgaon(Niphad)",
+        "Malegaon",
+        "Manmad",
+        "Nampur",
+        "Nandgaon",
+        "Pimpalgaon",
+        "Pimpalgaon Baswant(Saykheda)",
+        "Satana",
+        "Sinner",
+        "Suragana",
+        "Yeola"
+      ],
+      "commodities": [
+        "Wheat"
+      ],
+      "unparsed_dates": 0
+    },
+    "C_per_day_filter": {
+      "09/11/2026": {
+        "rows": 0,
+        "markets": []
+      },
+      "08/11/2026": {
+        "rows": 0,
+        "markets": []
+      },
+      "07/11/2026": {
+        "rows": 0,
+        "markets": []
+      },
+      "06/11/2026": {
+        "rows": 2,
+        "markets": [
+          "APMC Devala ",
+          "APMC Sinner "
+        ]
+      },
+      "05/11/2026": {
+        "rows": 7,
+        "markets": [
+          "APMC Devala ",
+          "APMC Manmad ",
+          "APMC Nandgaon ",
+          "APMC Satana ",
+          "APMC Sinner ",
+          "APMC Yeola ",
+          "Lasalgaon(Niphad) "
+        ]
+      }
+    }
+  },
+  {
+    "commodity": "Onion",
+    "district": "Nashik",
+    "A_app_style_with_sort": {
+      "total_reported": 71811,
+      "rows": 1000,
+      "min_date": "03/09/2026",
+      "max_date": "07/11/2026",
+      "age_days_of_newest": 2,
+      "sorted_desc": true,
+      "markets": [
+        "APMC Chandwad ",
+        "APMC Devala ",
+        "APMC Dindori ",
+        "APMC Kalvan ",
+        "APMC Lasalgaon ",
+        "APMC Manmad ",
+        "APMC Nampur",
+        "APMC Nandgaon ",
+        "APMC Nasik ",
+        "APMC Pimpalgaon Baswant ",
+        "APMC Satana ",
+        "APMC Sinner ",
+        "APMC Umrane",
+        "APMC Yeola ",
+        "Dindori(Vani) ",
+        "Lasalgaon(Niphad) ",
+        "Lasalgaon(Vinchur) ",
+        "Malharshree Khajgi Krushi Utpann Bajar, Chandanpuri Tal Malegaon, Nashik",
+        "Pimpalgaon Baswant(Saykheda) ",
+        "Shivsiddha Govind Producer Company Ltd Sanchalit Khajgi Krushi Utpann Bajar Samati-Abhona-Kalwan",
+        "Shri Rameshwar Krushi Market, M.Nagar, Tal Deola, Dist Nashik"
+      ],
+      "commodities": [
+        "Onion"
+      ],
+      "unparsed_dates": 0
+    },
+    "B_no_sort": {
+      "total_reported": 71811,
+      "rows": 1000,
+      "min_date": "01/01/2004",
+      "max_date": "31/12/2014",
+      "age_days_of_newest": 4331,
+      "sorted_desc": false,
+      "markets": [
+        "Chandvad",
+        "Devala",
+        "Dindori",
+        "Dindori(Vani)",
+        "Kalvan",
+        "Lasalgaon",
+        "Lasalgaon(Niphad)",
+        "Malegaon",
+        "Manmad",
+        "Nandgaon",
+        "Nasik",
+        "Pimpalgaon",
+        "Pimpalgaon Baswant(Saykheda)",
+        "Satana",
+        "Sinner",
+        "Yeola"
+      ],
+      "commodities": [
+        "Onion"
+      ],
+      "unparsed_dates": 0
+    },
+    "C_per_day_filter": {
+      "09/11/2026": {
+        "rows": 0,
+        "markets": []
+      },
+      "08/11/2026": {
+        "rows": 0,
+        "markets": []
+      },
+      "07/11/2026": {
+        "rows": 1,
+        "markets": [
+          "Dindori(Vani) "
+        ]
+      },
+      "06/11/2026": {
+        "rows": 2,
+        "markets": [
+          "APMC Nasik ",
+          "APMC Sinner "
+        ]
+      },
+      "05/11/2026": {
+        "rows": 21,
+        "markets": [
+          "APMC Chandwad ",
+          "APMC Devala ",
+          "APMC Kalvan ",
+          "APMC Manmad ",
+          "APMC Nasik ",
+          "APMC Pimpalgaon Baswant ",
+          "APMC Satana ",
+          "APMC Sinner ",
+          "APMC Umrane",
+          "Dindori(Vani) ",
+          "Lasalgaon(Vinchur) ",
+          "Shivsiddha Govind Producer Company Ltd Sanchalit Khajgi Krushi Utpann Bajar Samati-Abhona-Kalwan",
+          "Shri Rameshwar Krushi Market, M.Nagar, Tal Deola, Dist Nashik"
+        ]
+      }
+    }
+  },
+  {
+    "commodity": "Rice",
+    "district": "Nashik",
+    "A_app_style_with_sort": {
+      "total_reported": 1948,
+      "rows": 1000,
+      "min_date": "29/09/2019",
+      "max_date": "04/11/2026",
+      "age_days_of_newest": 5,
+      "sorted_desc": true,
+      "markets": [
+        "APMC Sinner ",
+        "Devala",
+        "Dindori",
+        "Kalvan",
+        "Lasalgaon",
+        "Lasalgaon(Niphad)",
+        "Nampur",
+        "Sinner",
+        "Sinner APMC"
+      ],
+      "commodities": [
+        "Rice"
+      ],
+      "unparsed_dates": 0
+    },
+    "B_no_sort": {
+      "total_reported": 1948,
+      "rows": 1000,
+      "min_date": "25/07/2003",
+      "max_date": "04/11/2026",
+      "age_days_of_newest": 5,
+      "sorted_desc": false,
+      "markets": [
+        "APMC Sinner ",
+        "Devala",
+        "Dindori",
+        "Ghoti",
+        "Kalvan",
+        "Lasalgaon",
+        "Lasalgaon(Niphad)",
+        "Nampur",
+        "Satana",
+        "Sinner",
+        "Suragana"
+      ],
+      "commodities": [
+        "Rice"
+      ],
+      "unparsed_dates": 0
+    },
+    "C_per_day_filter": {
+      "09/11/2026": {
+        "rows": 0,
+        "markets": []
+      },
+      "08/11/2026": {
+        "rows": 0,
+        "markets": []
+      },
+      "07/11/2026": {
+        "rows": 0,
+        "markets": []
+      },
+      "06/11/2026": {
+        "rows": 0,
+        "markets": []
+      },
+      "05/11/2026": {
+        "rows": 0,
+        "markets": []
+      }
+    }
+  },
+  {
+    "commodity": "Paddy(Dhan)(Common)",
+    "district": "Nashik",
+    "A_app_style_with_sort": {
+      "total_reported": 1068,
+      "rows": 1000,
+      "min_date": "08/10/2010",
+      "max_date": "02/05/2025",
+      "age_days_of_newest": 556,
+      "sorted_desc": true,
+      "markets": [
+        "Dindori(Vani)",
+        "Ghoti",
+        "Kalvan",
+        "Suragana"
+      ],
+      "commodities": [
+        "Paddy(Dhan)(Common)"
+      ],
+      "unparsed_dates": 0
+    },
+    "B_no_sort": {
+      "total_reported": 1068,
+      "rows": 1000,
+      "min_date": "23/03/2005",
+      "max_date": "02/05/2025",
+      "age_days_of_newest": 556,
+      "sorted_desc": false,
+      "markets": [
+        "Dindori(Vani)",
+        "Ghoti",
+        "Kalvan",
+        "Nandgaon",
+        "Suragana",
+        "Yeola"
+      ],
+      "commodities": [
+        "Paddy(Dhan)(Common)"
+      ],
+      "unparsed_dates": 0
+    },
+    "C_per_day_filter": {
+      "09/11/2026": {
+        "rows": 0,
+        "markets": []
+      },
+      "08/11/2026": {
+        "rows": 0,
+        "markets": []
+      },
+      "07/11/2026": {
+        "rows": 0,
+        "markets": []
+      },
+      "06/11/2026": {
+        "rows": 0,
+        "markets": []
+      },
+      "05/11/2026": {
+        "rows": 0,
+        "markets": []
+      }
+    }
+  },
+  {
+    "commodity": "Wheat",
+    "district": "Pune",
+    "A_app_style_with_sort": {
+      "total_reported": 14420,
+      "rows": 1000,
+      "min_date": "29/06/2025",
+      "max_date": "05/11/2026",
+      "age_days_of_newest": 4,
+      "sorted_desc": true,
+      "markets": [
+        "APMC Baramati",
+        "APMC Baramati ",
+        "APMC Dound ",
+        "APMC Indapur ",
+        "APMC Shirur ",
+        "Baramati",
+        "Baramati APMC",
+        "Dound",
+        "Dound APMC",
+        "Indapur APMC",
+        "Indapur(Bhigwan)",
+        "Indapur(Bhigwan) ",
+        "Indapur(Bhigwan) APMC",
+        "Indapur(Nimgaon Ketki)",
+        "Indapur(Nimgaon Ketki) APMC",
+        "Nira(Saswad)",
+        "Nira(Saswad) ",
+        "Nira(Saswad) APMC",
+        "Pune",
+        "Pune APMC",
+        "Shirur",
+        "Shirur APMC"
+      ],
+      "commodities": [
+        "Wheat"
+      ],
+      "unparsed_dates": 0
+    },
+    "B_no_sort": {
+      "total_reported": 14420,
+      "rows": 1000,
+      "min_date": "02/01/2004",
+      "max_date": "31/12/2021",
+      "age_days_of_newest": 1774,
+      "sorted_desc": false,
+      "markets": [
+        "Baramati",
+        "Dound",
+        "Indapur",
+        "Indapur(Bhigwan)",
+        "Indapur(Nimgaon Ketki)",
+        "Khed(Chakan)",
+        "Nira",
+        "Nira(Saswad)",
+        "Pune",
+        "Pune(Khadiki)",
+        "Pune(Pimpri)",
+        "Shirur"
+      ],
+      "commodities": [
+        "Wheat"
+      ],
+      "unparsed_dates": 0
+    },
+    "C_per_day_filter": {
+      "09/11/2026": {
+        "rows": 0,
+        "markets": []
+      },
+      "08/11/2026": {
+        "rows": 0,
+        "markets": []
+      },
+      "07/11/2026": {
+        "rows": 0,
+        "markets": []
+      },
+      "06/11/2026": {
+        "rows": 0,
+        "markets": []
+      },
+      "05/11/2026": {
+        "rows": 3,
+        "markets": [
+          "APMC Baramati"
+        ]
+      }
+    }
+  }
+]
