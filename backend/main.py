@@ -56,8 +56,10 @@ from faq import detect_faq, faq_answer
 from replies import _MSG, ask_text
 
 import httpx
+import secrets
+import socket
 from dotenv import load_dotenv
-from fastapi import FastAPI, File, Form, HTTPException, UploadFile, WebSocket, WebSocketDisconnect
+from fastapi import FastAPI, File, Form, Header, HTTPException, UploadFile, WebSocket, WebSocketDisconnect
 from fastapi.middleware.cors import CORSMiddleware
 from pydantic import BaseModel, Field
 
@@ -2480,7 +2482,120 @@ async def get_prices(commodity_id: str, market: Optional[str] = None, variety: O
     if commodity_id not in COMMODITIES:
         raise HTTPException(404, "Unsupported commodity ID")
     return await fetch_mandi_benchmark(commodity_id, market, variety, product_form, district)
+@app.get("/internal/diagnostics/data-gov")
+async def diagnose_data_gov(
+    diagnostic_token: Optional[str] = Header(default=None, alias="X-Diagnostic-Token"),
+) -> dict[str, Any]:
 
+    expected_token = os.getenv("SAUDAVANI_DIAGNOSTIC_TOKEN", "")
+
+    if not expected_token or not secrets.compare_digest(
+        diagnostic_token or "", expected_token
+    ):
+        raise HTTPException(status_code=404, detail="Not found")
+
+    host = "api.data.gov.in"
+
+    result: dict[str, Any] = {
+        "host": host,
+        "dns": {},
+        "httpx": {},
+        "curl": {},
+    }
+
+    # 1. DNS resolution from Render
+    try:
+        infos = await asyncio.to_thread(
+            socket.getaddrinfo,
+            host,
+            443,
+            socket.AF_UNSPEC,
+            socket.SOCK_STREAM,
+        )
+
+        addresses = sorted({item[4][0] for item in infos})
+
+        result["dns"] = {
+            "ok": bool(addresses),
+            "addresses": addresses,
+        }
+
+    except Exception as exc:
+        result["dns"] = {
+            "ok": False,
+            "error": type(exc).__name__,
+            "message": str(exc)[:180],
+        }
+
+    # 2. HTTPS connection through httpx
+    try:
+        async with httpx.AsyncClient(
+            timeout=httpx.Timeout(10.0),
+            follow_redirects=True,
+        ) as client:
+            response = await client.get(f"https://{host}/")
+
+        result["httpx"] = {
+            "connected": True,
+            "http_status": response.status_code,
+        }
+
+    except Exception as exc:
+        result["httpx"] = {
+            "connected": False,
+            "error": type(exc).__name__,
+            "message": str(exc)[:180],
+        }
+
+    # 3. HTTPS connection through the same curl binary used by the app
+    curl_path = _find_curl()
+
+    if curl_path:
+        command = [
+            str(curl_path),
+            "-sS",
+            "-o",
+            os.devnull,
+            "-w",
+            "%{http_code}",
+            "--connect-timeout",
+            "10",
+            "--max-time",
+            "15",
+            f"https://{host}/",
+        ]
+
+        try:
+            completed = await asyncio.to_thread(
+                subprocess.run,
+                command,
+                capture_output=True,
+                text=True,
+                timeout=18,
+                check=False,
+            )
+
+            result["curl"] = {
+                "available": True,
+                "exit_code": completed.returncode,
+                "http_status": completed.stdout.strip()[:20],
+                "error": (completed.stderr or "")[:180],
+            }
+
+        except Exception as exc:
+            result["curl"] = {
+                "available": True,
+                "error": type(exc).__name__,
+                "message": str(exc)[:180],
+            }
+
+    else:
+        result["curl"] = {
+            "available": False,
+            "message": "curl executable not found",
+        }
+
+    return result
 
 @app.post("/api/deals/{session_id}/buyer-offer")
 async def submit_buyer_offer(session_id: str, data: BuyerOfferIn) -> dict[str, Any]:
