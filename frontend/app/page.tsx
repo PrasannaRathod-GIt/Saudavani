@@ -10,19 +10,10 @@ import {
 import { REC_LABEL, useSilenceRecorder } from "./useSilenceRecorder";
 
 /*
- * SaudaVani farmer-facing page.
- * Contract checked against the uploaded FastAPI main.py:
- *   GET  /health
- *   GET  /api/session/{session_id}
- *   POST /api/voice/process (multipart/form-data)
- *   WS   /ws/trade/{session_id}
- *
- * Deal actions remain in the conversation/backend. No buyer/admin controls are
- * exposed here. Escrow is always a simulation; actual money transferred is ₹0.
- *
- * UI-only changes in this revision: Chat / Trade Details / Connection navigation,
- * a fixed-height scrolling chat area, and a voice indicator driven by the existing
- * recording (isRecording) and playback (phase === "speaking") states.
+ * API: GET /health, GET /api/session/{session_id},
+ * POST /api/voice/process (multipart), WS /ws/trade/{session_id}.
+ * Deal actions stay in the backend; this page exposes no buyer/admin controls.
+ * Escrow is simulated; actual money transferred is ₹0.
  */
 
 const API_BASE = (process.env.NEXT_PUBLIC_API_URL ?? "http://127.0.0.1:8000").replace(/\/+$/, "");
@@ -736,12 +727,10 @@ export default function SaudaVaniPage() {
   const lastWsBuyerConfirmedRef = useRef<boolean | null>(null);
   languageRef.current = language;
 
-  // Resume the same backend session after a page refresh or backend restart.
-  // The backend persists sessions in SQLite; generating a fresh ID on every mount
-  // would make the UI look like the farmer must enter all details again.
+  // Resume the SQLite-backed session so refreshes do not restart the farmer flow.
   useEffect(() => {
     const storedId = window.localStorage.getItem(SESSION_STORAGE_KEY);
-    // Backend-rotated IDs append a commodity and UUID suffix, so accept the full backend ID alphabet.
+    // Accept the full session ID format returned by the backend.
     const id = storedId && /^[A-Za-z0-9_.:\-]{1,128}$/.test(storedId)
       ? storedId
       : newSessionId();
@@ -821,8 +810,7 @@ export default function SaudaVaniPage() {
 
           if (!message.state) return;
           const nextTrade = toTradeState(message.state);
-          // The first WebSocket packet is a snapshot. Seed the status without announcing an
-          // old locked deal as if it had just been accepted during this page visit.
+          // Seed the snapshot without announcing an existing lock as new.
 if (message.type === "snapshot" || lastWsDealStatusRef.current == null) {
   lastWsDealStatusRef.current = nextTrade.dealStatus;
   lastWsBuyerConfirmedRef.current = nextTrade.buyerConfirmed;
@@ -892,8 +880,7 @@ if (!noticeReceived && !message.agent_text) {
     void syncSessionState(sessionId);
   }, [sessionId, syncSessionState]);
 
-  // The chat panel stays mounted (hidden) while other tabs are open, so scroll to the
-  // latest message on new messages and when returning to the Chat tab.
+  // Keep chat mounted so tab switches preserve its scroll position and recorder.
   useEffect(() => {
     if (view !== "chat") return;
     logRef.current?.scrollTo({ top: logRef.current.scrollHeight, behavior: "smooth" });
@@ -1200,6 +1187,20 @@ if (!noticeReceived && !message.agent_text) {
             <div className="min-w-0">
               <h1 className="truncate text-xl font-bold tracking-tight sm:text-2xl">SaudaVani <span className="text-slate-400">सौदावाणी</span></h1>
               <p className="text-xs text-slate-500">Mandi voice assistant · Farmer desk</p>
+              <div className="mt-1.5 flex flex-wrap items-center gap-x-2 gap-y-1">
+                <span className="inline-flex rounded-full border border-amber-300 bg-amber-100 px-2 py-0.5 text-[10px] font-bold tracking-[0.12em] text-slate-900">
+                  DEMO MODE
+                </span>
+                <span className="text-[11px] leading-4 text-slate-500">
+                  Demonstration only · No real money transferred
+                </span>
+                <span className="w-full text-[10px] leading-4 text-amber-800">
+                  Demo deployment · Live data.gov.in mandi-price lookup is not connected.
+                </span>
+                <span className="w-full text-[10px] leading-4 text-slate-500">
+                  For the full setup, clone the repository and configure your own data.gov.in API key.
+                </span>
+              </div>
             </div>
           </div>
           <button type="button" onClick={resetSession} disabled={isRecording || busy} className="min-h-[44px] shrink-0 rounded-lg border border-slate-300 bg-white px-3 py-2 text-sm font-semibold hover:bg-slate-50 disabled:cursor-not-allowed disabled:opacity-50">
