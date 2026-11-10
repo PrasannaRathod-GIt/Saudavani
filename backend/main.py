@@ -379,13 +379,49 @@ _ACCEPT_QUALIFIERS = {"pan", "but", "lekin", "magar", "par", "पण", "ले�
 def is_accept(text: str) -> bool:
     tokens = _toks(text)
     token_set = set(tokens)
-    return (_tok_in(tokens, _ACCEPT_POSITIVE) and not (token_set & _ACCEPT_NEGATIVE) and not (token_set & _ACCEPT_QUALIFIERS) and len(tokens) <= 6)
 
+    if not tokens:
+        return False
 
-_REJECT_PHRASES = ["reject", "rejected", "not accept", "dont accept", "don't accept", "nahi chalega", "nahin chalega", "nahi manunga", "nahi manzoor", "manzoor nahi",
-                   "manjur nahi", "nakar", "nakara", "nakarla", "naamanjur", "namanjur", "manya nahi", "nahi chalel", "naka chalel", "inkar", "इनकार", "अस्वीकार", "नाकार",
-                   "नाकारा", "नामंजूर", "नामंज़ूर", "मंजूर नहीं", "मंज़ूर नहीं", "मान्य नाही", "नहीं चलेगा", "नाही चालेल", "नहीं मानूंगा", "नहीं मानूँगा", "नको हा भाव", "ये भाव नहीं"]
+    # Never accept an answer containing a clear rejection or condition.
+    if token_set & _ACCEPT_NEGATIVE:
+        return False
+    if token_set & _ACCEPT_QUALIFIERS:
+        return False
 
+    # Clear natural-language Hindi and Marathi commitments.
+    explicit_accept_phrases = [
+        "मुझे ये भाव मंजूर है",
+        "मुझे यह भाव मंजूर है",
+        "मुझे ये भाव चलेगा",
+        "मुझे यह भाव चलेगा",
+        "ये भाव मंजूर है",
+        "यह भाव मंजूर है",
+        "इसे लॉक कर दें",
+        "लॉक कर दें",
+        "मला हा भाव मान्य आहे",
+        "मला हा भाव चालेल",
+        "हा भाव मान्य आहे",
+        "हा भाव चालेल",
+        "व्यवहार पक्का करा",
+        "हा व्यवहार पक्का करा",
+        "mala ha bhav manya aahe",
+        "mala ha bhav chalel",
+        "mujhe ye bhav manzoor hai",
+        "mujhe ye bhav chalega",
+        "ye offer chalega",
+        "haan lock karo",
+        "pakka kar do",
+    ]
+
+    if _phrase_in(normalize_text(text), explicit_accept_phrases):
+        return True
+
+    # Allow longer spoken confirmations, not just one-word answers.
+    return (
+        _tok_in(tokens, _ACCEPT_POSITIVE)
+        and len(tokens) <= 14
+    )
 
 def is_reject(text: str) -> bool:
     return _phrase_in(normalize_text(text), _REJECT_PHRASES)
