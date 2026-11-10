@@ -19,6 +19,10 @@ import { REC_LABEL, useSilenceRecorder } from "./useSilenceRecorder";
  *
  * Deal actions remain in the conversation/backend. No buyer/admin controls are
  * exposed here. Escrow is always a simulation; actual money transferred is ₹0.
+ *
+ * UI-only changes in this revision: Chat / Trade Details / Connection navigation,
+ * a fixed-height scrolling chat area, and a voice indicator driven by the existing
+ * recording (isRecording) and playback (phase === "speaking") states.
  */
 
 const API_BASE = (process.env.NEXT_PUBLIC_API_URL ?? "http://127.0.0.1:8000").replace(/\/+$/, "");
@@ -32,7 +36,26 @@ const LANGUAGE_OPTIONS = [
   { value: "hinglish", label: "Hinglish" },
 ] as const;
 
+const VIEW_TABS = [
+  { id: "chat", label: "Chat" },
+  { id: "trade", label: "Trade Details" },
+  { id: "connection", label: "Connection" },
+] as const;
+
+// Keyframes for the voice indicator. Kept local so no global CSS file needs to change.
+const VOICE_CSS = `
+@keyframes sv-bar { 0%, 100% { transform: scaleY(0.25); } 50% { transform: scaleY(1); } }
+@keyframes sv-ring { 0% { transform: scale(1); opacity: 0.45; } 100% { transform: scale(1.35); opacity: 0; } }
+.sv-bar { animation: sv-bar 0.9s ease-in-out infinite; transform-origin: center; }
+.sv-ring { animation: sv-ring 1.6s ease-out infinite; }
+@media (prefers-reduced-motion: reduce) {
+  .sv-bar, .sv-ring { animation: none; }
+  .sv-bar { transform: scaleY(0.6); }
+}
+`;
+
 type LanguageHint = (typeof LANGUAGE_OPTIONS)[number]["value"];
+type View = (typeof VIEW_TABS)[number]["id"];
 type Phase = "idle" | "processing" | "speaking";
 type UnknownRecord = Record<string, unknown>;
 
@@ -396,6 +419,26 @@ function dealAcceptedMessage(trade: TradeState, language: LanguageHint): string 
   }
   return `Buyer ne aapka offer accept kar liya hai. ${cropLabel} ka rate ${rateLabel} per quintal aur quantity ${quantityLabel} quintal hai. Deal confirm ho gayi hai; total ${grossLabel}. Yeh sirf demo hai — actual money transferred: ₹0.`;
 }
+function buyerResponseMessage(kind: "accepted" | "rejected", trade: TradeState, language: LanguageHint): string {
+  const price = trade.activeOffer?.price_per_quintal ?? trade.buyerOffer?.price_per_quintal ?? null;
+  const rateLabel = money(price);
+  if (kind === "accepted") {
+    if (language === "mr-IN") {
+      return `खरेदीदाराने तुमचा प्रस्ताव (${rateLabel} प्रति क्विंटल) स्वीकारला आहे. सौदा निश्चित करण्यासाठी तुमची पुष्टी अजून बाकी आहे.`;
+    }
+    if (language === "hi-IN") {
+      return `खरीदार ने आपका प्रस्ताव (${rateLabel} प्रति क्विंटल) स्वीकार कर लिया है। सौदा पक्का करने के लिए आपकी पुष्टि अभी बाकी है।`;
+    }
+    return `Buyer ne aapka offer (${rateLabel} per quintal) accept kar liya hai. Deal pakka karne ke liye aapki confirmation abhi baaki hai.`;
+  }
+  if (language === "mr-IN") {
+    return "खरेदीदाराने हा प्रस्ताव नाकारला आहे. नवीन प्रस्ताव आवश्यक आहे; तुम्ही नवीन भाव सांगू शकता.";
+  }
+  if (language === "hi-IN") {
+    return "खरीदार ने यह प्रस्ताव अस्वीकार कर दिया है। नया प्रस्ताव ज़रूरी है; आप नया भाव बता सकते हैं।";
+  }
+  return "Buyer ne yeh offer reject kar diya hai. Naya offer chahiye; aap naya rate bata sakte hain.";
+}
 
 function readableStatus(status: string): string {
   const labels: Record<string, string> = {
@@ -668,6 +711,7 @@ function TradeSummary({ trade }: { trade: TradeState }) {
 export default function SaudaVaniPage() {
   const [sessionId, setSessionId] = useState<string | null>(null);
   const [language, setLanguage] = useState<LanguageHint>("mr-IN");
+  const [view, setView] = useState<View>("chat");
   const [phase, setPhase] = useState<Phase>("idle");
   const [trade, setTrade] = useState<TradeState>(EMPTY_TRADE);
   const [messages, setMessages] = useState<Message[]>([]);
@@ -689,6 +733,7 @@ export default function SaudaVaniPage() {
   const lastWsDealStatusRef = useRef<string | null>(null);
   const lockNoticeSessionRef = useRef<string | null>(null);
   const shareTimeoutRef = useRef<number | null>(null);
+  const lastWsBuyerConfirmedRef = useRef<boolean | null>(null);
   languageRef.current = language;
 
   // Resume the same backend session after a page refresh or backend restart.
@@ -778,15 +823,38 @@ export default function SaudaVaniPage() {
           const nextTrade = toTradeState(message.state);
           // The first WebSocket packet is a snapshot. Seed the status without announcing an
           // old locked deal as if it had just been accepted during this page visit.
-          if (message.type === "snapshot" || lastWsDealStatusRef.current == null) {
-            lastWsDealStatusRef.current = nextTrade.dealStatus;
-            setTrade(nextTrade);
-            return;
-          }
+if (message.type === "snapshot" || lastWsDealStatusRef.current == null) {
+  lastWsDealStatusRef.current = nextTrade.dealStatus;
+  lastWsBuyerConfirmedRef.current = nextTrade.buyerConfirmed;
+  setTrade(nextTrade);
+  return;
+}
 
-          const previousStatus = lastWsDealStatusRef.current;
-          lastWsDealStatusRef.current = nextTrade.dealStatus;
-          setTrade(nextTrade);
+const previousStatus = lastWsDealStatusRef.current;
+const previousBuyerConfirmed = lastWsBuyerConfirmedRef.current === true;
+lastWsDealStatusRef.current = nextTrade.dealStatus;
+lastWsBuyerConfirmedRef.current = nextTrade.buyerConfirmed;
+setTrade(nextTrade);
+
+// Localized farmer-facing notices for buyer responses. Skipped when the server
+// already sent its own notice for this packet, to avoid duplicates.
+if (!noticeReceived && !message.agent_text) {
+  const nowLocked = nextTrade.dealStatus === "LOCKED" || nextTrade.dealStatus === "LOCKED_DEMO";
+  const buyerRejected = nextTrade.dealStatus === "OFFER_REJECTED" && previousStatus !== "OFFER_REJECTED";
+  const buyerAcceptedAwaitingFarmer =
+    !nowLocked &&
+    !nextTrade.farmerConfirmed &&
+    nextTrade.dealStatus !== "CANCELLED" &&
+    nextTrade.dealStatus !== "OFFER_REJECTED" &&
+    nextTrade.dealStatus !== "OFFER_EXPIRED" &&
+    ((nextTrade.buyerConfirmed && !previousBuyerConfirmed) ||
+      (nextTrade.dealStatus === "PENDING_FARMER_CONFIRMATION" && previousStatus !== "PENDING_FARMER_CONFIRMATION"));
+  if (buyerRejected || buyerAcceptedAwaitingFarmer) {
+    const text = buyerResponseMessage(buyerRejected ? "rejected" : "accepted", nextTrade, languageRef.current);
+    setMessages((current) => [...current, { id: newSessionId(), role: "agent", text }]);
+    speakInBrowserRef.current(text, languageRef.current);
+  }
+}
 
           const isLocked = nextTrade.dealStatus === "LOCKED" || nextTrade.dealStatus === "LOCKED_DEMO";
           const wasLocked = previousStatus === "LOCKED" || previousStatus === "LOCKED_DEMO";
@@ -824,10 +892,12 @@ export default function SaudaVaniPage() {
     void syncSessionState(sessionId);
   }, [sessionId, syncSessionState]);
 
-
+  // The chat panel stays mounted (hidden) while other tabs are open, so scroll to the
+  // latest message on new messages and when returning to the Chat tab.
   useEffect(() => {
+    if (view !== "chat") return;
     logRef.current?.scrollTo({ top: logRef.current.scrollHeight, behavior: "smooth" });
-  }, [messages, phase]);
+  }, [messages, phase, view]);
 
   useEffect(() => {
     return () => {
@@ -948,6 +1018,7 @@ export default function SaudaVaniPage() {
         window.localStorage.setItem(SESSION_STORAGE_KEY, responseSessionId);
         setSessionId(responseSessionId); // sessionId-dependent effect reconnects /ws/trade to the new session
         lastWsDealStatusRef.current = null;
+        lastWsBuyerConfirmedRef.current = null;
         lockNoticeSessionRef.current = null;
       }
       const agentText = data.agent_text?.trim() || "I could not prepare a response. Please try again.";
@@ -1042,6 +1113,7 @@ export default function SaudaVaniPage() {
     start,
     stop,
     isRecording,
+    autoStopAvailable,
   } = useSilenceRecorder(handleRecordedAudio);
 
   const onMicClick = useCallback(() => {
@@ -1080,6 +1152,7 @@ export default function SaudaVaniPage() {
     setShareMessage(null);
     setDraft("");
     lastWsDealStatusRef.current = null;
+    lastWsBuyerConfirmedRef.current = null;
     lockNoticeSessionRef.current = null;
     const nextId = newSessionId();
     window.localStorage.setItem(SESSION_STORAGE_KEY, nextId);
@@ -1087,13 +1160,25 @@ export default function SaudaVaniPage() {
   };
 
   const busy = phase === "processing" || recState === "processing";
-  const micLabel = recState !== "idle"
-    ? REC_LABEL[recState]
-    : phase === "processing"
-      ? "Checking your details and preparing a reply…"
-      : phase === "speaking"
-        ? "SaudaVani is speaking · tap to stop"
-        : "Tap to speak, or type your message";
+  const micLabel = recState === "listening" && !autoStopAvailable
+    ? "Recording… tap the button when you finish speaking"
+    : recState !== "idle"
+      ? REC_LABEL[recState]
+      : phase === "processing"
+        ? "Checking your details and preparing a reply…"
+        : phase === "speaking"
+          ? "SaudaVani is speaking · tap to stop"
+          : "Tap to speak, or type your message";
+
+  // Voice indicator state comes only from the real recorder / playback state.
+  const isSpeaking = phase === "speaking";
+  const voiceActive = (isRecording || isSpeaking) && !busy;
+  const voiceStatus = isRecording ? "Listening" : busy ? "Processing" : isSpeaking ? "Speaking" : "Idle";
+  const connectionDot = healthStatus === "online" && wsLive
+    ? "bg-emerald-600"
+    : healthStatus === "offline"
+      ? "bg-rose-600"
+      : "bg-amber-500";
 
   const suggestions = language === "mr-IN"
     ? ["माझ्याकडे 3 क्विंटल गहू आहे", "माझ्या मालाचा मंडी भाव सांगा", "भाव थोडा वाढवा"]
@@ -1106,137 +1191,215 @@ export default function SaudaVaniPage() {
     : null;
 
   return (
-    <main className="min-h-screen bg-[#f4f6f7] text-slate-900">
-      <div className="mx-auto max-w-6xl px-4 py-5 sm:px-6 lg:py-8">
-        <header className="flex flex-wrap items-center justify-between gap-4 border-b border-slate-200 pb-5">
-          <div>
-            <div className="flex items-center gap-2">
-              <span className="grid h-10 w-10 place-items-center rounded-xl bg-emerald-800 text-lg font-bold text-white">स</span>
-              <div>
-                <h1 className="text-2xl font-bold tracking-tight">SaudaVani <span className="text-slate-400">सौदावाणी</span></h1>
-                <p className="text-xs text-slate-500">Mandi voice assistant · Farmer desk</p>
-              </div>
+    <main className="min-h-screen overflow-x-hidden bg-[#f4f6f7] text-slate-900">
+      <style>{VOICE_CSS}</style>
+      <div className="mx-auto max-w-4xl px-4 py-4 sm:px-6 lg:py-6">
+        <header className="flex items-center justify-between gap-3 pb-4">
+          <div className="flex min-w-0 items-center gap-2">
+            <span className="grid h-10 w-10 shrink-0 place-items-center rounded-xl bg-emerald-800 text-lg font-bold text-white">स</span>
+            <div className="min-w-0">
+              <h1 className="truncate text-xl font-bold tracking-tight sm:text-2xl">SaudaVani <span className="text-slate-400">सौदावाणी</span></h1>
+              <p className="text-xs text-slate-500">Mandi voice assistant · Farmer desk</p>
             </div>
           </div>
-          <div className="flex flex-wrap items-center gap-2">
-            <span className={`inline-flex items-center gap-2 rounded-full px-3 py-1.5 text-xs font-semibold ${healthStatus === "online" ? "bg-emerald-100 text-emerald-800" : healthStatus === "offline" ? "bg-rose-100 text-rose-800" : "bg-slate-200 text-slate-600"}`}>
-              <span className={`h-2 w-2 rounded-full ${healthStatus === "online" ? "bg-emerald-600" : healthStatus === "offline" ? "bg-rose-600" : "bg-slate-400"}`} />
-              {healthStatus === "online" ? "Backend connected" : healthStatus === "offline" ? "Backend offline" : "Checking backend"}
-            </span>
-            <span className={`rounded-full px-3 py-1.5 text-xs font-semibold ${wsLive ? "bg-emerald-100 text-emerald-800" : "bg-slate-200 text-slate-600"}`}>
-              {wsLive ? "Live sync on" : "Live sync reconnecting"}
-            </span>
-            <button type="button" onClick={resetSession} disabled={isRecording || busy} className="rounded-lg border border-slate-300 bg-white px-3 py-2 text-sm font-semibold hover:bg-slate-50 disabled:cursor-not-allowed disabled:opacity-50">
-              New session
-            </button>
-          </div>
+          <button type="button" onClick={resetSession} disabled={isRecording || busy} className="min-h-[44px] shrink-0 rounded-lg border border-slate-300 bg-white px-3 py-2 text-sm font-semibold hover:bg-slate-50 disabled:cursor-not-allowed disabled:opacity-50">
+            New session
+          </button>
         </header>
 
-        <div className="mt-5 grid gap-5 lg:grid-cols-[minmax(0,1fr)_minmax(330px,0.85fr)]">
-          <section className="flex min-h-[640px] flex-col overflow-hidden rounded-2xl border border-slate-200 bg-white shadow-sm" aria-label="Farmer conversation">
-            <div className="flex flex-wrap items-center justify-between gap-3 border-b border-slate-100 px-4 py-4 sm:px-5">
-              <div>
-                <h2 className="font-semibold text-slate-900">Talk to SaudaVani</h2>
-                <p className="mt-0.5 text-xs text-slate-500">Speak naturally. You can also type in the chat.</p>
-              </div>
-              <label className="flex items-center gap-2 text-xs font-medium text-slate-600">
-                Language
-                <select value={language} onChange={(event) => setLanguage(event.target.value as LanguageHint)} disabled={busy || isRecording} className="rounded-lg border border-slate-300 bg-white px-2.5 py-2 text-sm text-slate-800 outline-none focus:border-emerald-700">
-                  {LANGUAGE_OPTIONS.map((option) => <option key={option.value} value={option.value}>{option.label}</option>)}
-                </select>
-              </label>
-            </div>
+        <nav role="tablist" aria-label="Farmer desk views" className="mb-4 grid grid-cols-3 gap-1 rounded-2xl bg-slate-200/70 p-1">
+          {VIEW_TABS.map((tab) => {
+            const selected = view === tab.id;
+            return (
+              <button
+                key={tab.id}
+                type="button"
+                role="tab"
+                id={`tab-${tab.id}`}
+                aria-selected={selected}
+                aria-controls={`panel-${tab.id}`}
+                onClick={() => setView(tab.id)}
+                className={`flex min-h-[44px] items-center justify-center gap-1.5 rounded-xl px-2 text-[13px] font-semibold transition focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-emerald-800 sm:text-sm ${selected ? "bg-white text-emerald-900 shadow-sm" : "text-slate-600 hover:text-slate-900"}`}
+              >
+                {tab.label}
+                {tab.id === "connection" && <span aria-hidden className={`h-2 w-2 rounded-full ${connectionDot}`} />}
+              </button>
+            );
+          })}
+        </nav>
 
-            <div ref={logRef} className="flex-1 space-y-4 overflow-y-auto bg-[#fbfcfc] p-4 sm:p-5" aria-live="polite" aria-relevant="additions text">
-              {messages.length === 0 ? (
-                <div className="mx-auto mt-8 max-w-md text-center">
-                  <div className="mx-auto grid h-16 w-16 place-items-center rounded-2xl bg-emerald-50 text-3xl">🌾</div>
-                  <h3 className="mt-4 text-lg font-semibold">Namaskar! नमस्कार!</h3>
-                  <p className="mt-2 text-sm leading-relaxed text-slate-600">Tell me what crop you want to sell. I’ll ask for the quantity, variety, district and quality details, then check the available mandi reference.</p>
-                  <div className="mt-5 flex flex-wrap justify-center gap-2">
-                    {suggestions.map((suggestion) => (
-                      <button key={suggestion} type="button" disabled={busy || isRecording || !sessionId} onClick={() => void sendTurn({ transcript: suggestion })} className="rounded-full border border-slate-200 bg-white px-3 py-2 text-left text-xs text-slate-700 hover:border-emerald-700 hover:text-emerald-800 disabled:opacity-50">
-                        {suggestion}
-                      </button>
-                    ))}
+        {/* Chat stays mounted so scroll position and the recorder are never lost when switching tabs. */}
+        <section
+          role="tabpanel"
+          id="panel-chat"
+          aria-labelledby="tab-chat"
+          aria-label="Farmer conversation"
+          className={`${view === "chat" ? "flex" : "hidden"} h-[calc(100dvh-14rem)] min-h-[520px] flex-col overflow-hidden rounded-2xl border border-slate-200 bg-white shadow-sm`}
+        >
+          <div className="flex flex-wrap items-center justify-between gap-3 border-b border-slate-100 px-4 py-3 sm:px-5">
+            <div>
+              <h2 className="font-semibold text-slate-900">Talk to SaudaVani</h2>
+              <p className="mt-0.5 text-xs text-slate-500">Speak naturally. You can also type in the chat.</p>
+            </div>
+            <label className="flex items-center gap-2 text-xs font-medium text-slate-600">
+              Language
+              <select value={language} onChange={(event) => setLanguage(event.target.value as LanguageHint)} disabled={busy || isRecording} className="min-h-[40px] rounded-lg border border-slate-300 bg-white px-2.5 py-2 text-sm text-slate-800 outline-none focus:border-emerald-700">
+                {LANGUAGE_OPTIONS.map((option) => <option key={option.value} value={option.value}>{option.label}</option>)}
+              </select>
+            </label>
+          </div>
+
+          <div ref={logRef} className="min-h-0 flex-1 space-y-4 overflow-y-auto overscroll-contain bg-[#fbfcfc] p-4 sm:p-5" aria-live="polite" aria-relevant="additions text">
+            {messages.length === 0 ? (
+              <div className="mx-auto mt-4 max-w-md text-center">
+                <div className="mx-auto grid h-16 w-16 place-items-center rounded-2xl bg-emerald-50 text-3xl">🌾</div>
+                <h3 className="mt-4 text-lg font-semibold">Namaskar! नमस्कार!</h3>
+                <p className="mt-2 text-sm leading-relaxed text-slate-600">Tell me what crop you want to sell. I’ll ask for the quantity, variety, district and quality details, then check the available mandi reference.</p>
+                <div className="mt-5 flex flex-wrap justify-center gap-2">
+                  {suggestions.map((suggestion) => (
+                    <button key={suggestion} type="button" disabled={busy || isRecording || !sessionId} onClick={() => void sendTurn({ transcript: suggestion })} className="min-h-[40px] rounded-full border border-slate-200 bg-white px-3 py-2 text-left text-xs text-slate-700 hover:border-emerald-700 hover:text-emerald-800 disabled:opacity-50">
+                      {suggestion}
+                    </button>
+                  ))}
+                </div>
+              </div>
+            ) : (
+              messages.map((message) => (
+                <div key={message.id} className={`flex ${message.role === "farmer" ? "justify-end" : "justify-start"}`}>
+                  <div className={`min-w-0 max-w-[88%] rounded-2xl px-4 py-3 ${message.role === "farmer" ? "rounded-br-md bg-emerald-800 text-white" : "rounded-bl-md border border-slate-200 bg-white text-slate-900"}`}>
+                    <p className={`mb-1 text-[11px] font-semibold ${message.role === "farmer" ? "text-emerald-100" : "text-slate-500"}`}>{message.role === "farmer" ? "You" : "SaudaVani"}</p>
+                    <p className="whitespace-pre-wrap break-words text-sm leading-relaxed">{message.text}</p>
                   </div>
                 </div>
-              ) : (
-                messages.map((message) => (
-                  <div key={message.id} className={`flex ${message.role === "farmer" ? "justify-end" : "justify-start"}`}>
-                    <div className={`max-w-[88%] rounded-2xl px-4 py-3 ${message.role === "farmer" ? "rounded-br-md bg-emerald-800 text-white" : "rounded-bl-md border border-slate-200 bg-white text-slate-900"}`}>
-                      <p className={`mb-1 text-[11px] font-semibold ${message.role === "farmer" ? "text-emerald-100" : "text-slate-500"}`}>{message.role === "farmer" ? "You" : "SaudaVani"}</p>
-                      <p className="whitespace-pre-wrap text-sm leading-relaxed">{message.text}</p>
-                    </div>
-                  </div>
-                ))
-              )}
-              {busy && (
-                <div className="flex justify-start">
-                  <div className="rounded-2xl rounded-bl-md border border-slate-200 bg-white px-4 py-3 text-sm text-slate-600">
-                    <span className="mr-2 inline-block h-2 w-2 animate-pulse rounded-full bg-emerald-700" />
-                    Processing your message…
-                  </div>
+              ))
+            )}
+            {busy && (
+              <div className="flex justify-start">
+                <div className="rounded-2xl rounded-bl-md border border-slate-200 bg-white px-4 py-3 text-sm text-slate-600">
+                  <span className="mr-2 inline-block h-2 w-2 animate-pulse rounded-full bg-emerald-700" />
+                  Processing your message…
                 </div>
-              )}
-            </div>
-
-            {error && <div role="alert" className="mx-4 mb-2 rounded-lg border border-rose-200 bg-rose-50 px-3 py-2 text-sm text-rose-800">{error}</div>}
-            {recState === "error" && recError && <div role="alert" className="mx-4 mb-2 rounded-lg border border-rose-200 bg-rose-50 px-3 py-2 text-sm text-rose-800">{recError}</div>}
-            {notice && <div role="status" className="mx-4 mb-2 rounded-lg border border-amber-200 bg-amber-50 px-3 py-2 text-xs text-amber-900">{notice}</div>}
-
-            <div className="border-t border-slate-100 p-4 sm:p-5">
-              <div className="mb-3 flex items-center justify-center gap-2 text-xs text-slate-500" role="status" aria-live="polite">
-                {isRecording && <span className="h-2 w-2 animate-pulse rounded-full bg-rose-600" />}
-                {micLabel}
               </div>
-              <div className="flex items-center justify-center">
-                <button type="button" onClick={onMicClick} disabled={busy || !sessionId || healthStatus === "offline" || (healthStatus === "online" && health?.gnani === false)} aria-label={isRecording ? "Stop recording and send" : phase === "speaking" ? "Stop speech" : "Start microphone"} className={`grid h-20 w-20 place-items-center rounded-full text-white shadow-lg transition focus-visible:outline-2 focus-visible:outline-offset-4 focus-visible:outline-emerald-800 disabled:cursor-not-allowed disabled:opacity-50 ${isRecording ? "bg-rose-600 hover:bg-rose-700" : busy ? "bg-slate-500" : "bg-emerald-800 hover:bg-emerald-900"}`}>
-                  {busy ? <span className="h-7 w-7 animate-spin rounded-full border-2 border-white/40 border-t-white" /> : isRecording ? <span className="h-6 w-6 rounded-md bg-white" /> : phase === "speaking" ? <span className="text-2xl">■</span> : <svg viewBox="0 0 24 24" className="h-8 w-8" fill="none" stroke="currentColor" strokeWidth="1.8" aria-hidden="true"><rect x="9" y="3" width="6" height="12" rx="3" /><path d="M5 11a7 7 0 0 0 14 0M12 18v3m-4 0h8" strokeLinecap="round" /></svg>}
+            )}
+          </div>
+
+          {error && <div role="alert" className="mx-4 mb-2 rounded-lg border border-rose-200 bg-rose-50 px-3 py-2 text-sm text-rose-800">{error}</div>}
+          {recState === "error" && recError && <div role="alert" className="mx-4 mb-2 rounded-lg border border-rose-200 bg-rose-50 px-3 py-2 text-sm text-rose-800">{recError}</div>}
+          {notice && <div role="status" className="mx-4 mb-2 rounded-lg border border-amber-200 bg-amber-50 px-3 py-2 text-xs text-amber-900">{notice}</div>}
+
+          <div className="border-t border-slate-100 p-4 sm:p-5">
+            <div className="mb-3 flex items-center justify-center gap-2 text-center text-xs text-slate-500" role="status" aria-live="polite">
+              {isRecording && <span className="h-2 w-2 shrink-0 animate-pulse rounded-full bg-rose-600" />}
+              {micLabel}
+            </div>
+            <div className="flex items-center justify-center">
+              <div className="relative">
+                {voiceActive && <span aria-hidden className="sv-ring absolute inset-0 rounded-full bg-emerald-500" />}
+                <button type="button" onClick={onMicClick} disabled={busy || !sessionId || healthStatus === "offline" || (healthStatus === "online" && health?.gnani === false)} aria-label={isRecording ? "Stop recording and send" : phase === "speaking" ? "Stop speech" : "Start microphone"} className={`relative grid h-20 place-items-center overflow-hidden rounded-full bg-emerald-800 text-white shadow-lg transition-[width,box-shadow,background-color] duration-500 ease-out focus-visible:outline-2 focus-visible:outline-offset-4 focus-visible:outline-emerald-800 disabled:cursor-not-allowed disabled:opacity-50 ${voiceActive ? "w-44 shadow-emerald-900/30" : busy ? "w-20 bg-slate-500" : "w-20 hover:bg-emerald-900"}`}>
+                  {/* Gradient layers fade in only while the real recorder / playback state is active. */}
+                  <span aria-hidden className={`absolute inset-0 bg-gradient-to-br from-emerald-400 via-teal-600 to-emerald-900 transition-opacity duration-500 ${isRecording && !busy ? "opacity-100" : "opacity-0"}`} />
+                  <span aria-hidden className={`absolute inset-0 bg-gradient-to-br from-sky-400 via-emerald-600 to-teal-900 transition-opacity duration-500 ${isSpeaking && !isRecording && !busy ? "opacity-100" : "opacity-0"}`} />
+                  <span className="relative grid place-items-center">
+                    {busy ? (
+                      <span className="h-7 w-7 animate-spin rounded-full border-2 border-white/40 border-t-white" />
+                    ) : voiceActive ? (
+                      <span aria-hidden className="flex h-10 items-center gap-1.5">
+                        {[0, 1, 2, 3, 4, 5, 6].map((index) => (
+                          <span
+                            key={index}
+                            className="sv-bar h-full w-1.5 rounded-full bg-white/90"
+                            style={{ animationDelay: `${index * 110}ms`, animationDuration: isSpeaking ? "1.3s" : "0.8s" }}
+                          />
+                        ))}
+                      </span>
+                    ) : (
+                      <svg viewBox="0 0 24 24" className="h-8 w-8" fill="none" stroke="currentColor" strokeWidth="1.8" aria-hidden="true"><rect x="9" y="3" width="6" height="12" rx="3" /><path d="M5 11a7 7 0 0 0 14 0M12 18v3m-4 0h8" strokeLinecap="round" /></svg>
+                    )}
+                  </span>
                 </button>
               </div>
-              <form onSubmit={submitText} className="mt-4 flex items-end gap-2">
-                <label className="sr-only" htmlFor="farmer-message">Type a message</label>
-                <textarea id="farmer-message" value={draft} onChange={(event) => setDraft(event.target.value)} onKeyDown={(event) => { if (event.key === "Enter" && !event.shiftKey) { event.preventDefault(); event.currentTarget.form?.requestSubmit(); } }} disabled={busy || isRecording || !sessionId} rows={2} placeholder="Type your message here…" className="min-h-[48px] min-w-0 flex-1 resize-y rounded-xl border border-slate-300 bg-white px-3 py-3 text-sm outline-none placeholder:text-slate-400 focus:border-emerald-700 disabled:bg-slate-100" />
-                <button type="submit" disabled={!draft.trim() || busy || isRecording || !sessionId} className="rounded-xl bg-slate-900 px-4 py-3 text-sm font-semibold text-white hover:bg-slate-700 disabled:cursor-not-allowed disabled:opacity-40">Send</button>
-              </form>
-              <p className="mt-2 text-center text-[11px] text-slate-400">Microphone access and a configured Gnani STT key are required for voice input. Text chat works without microphone access.</p>
+            </div>
+            <form onSubmit={submitText} className="mt-4 flex items-end gap-2">
+              <label className="sr-only" htmlFor="farmer-message">Type a message</label>
+              <textarea id="farmer-message" value={draft} onChange={(event) => setDraft(event.target.value)} onKeyDown={(event) => { if (event.key === "Enter" && !event.shiftKey) { event.preventDefault(); event.currentTarget.form?.requestSubmit(); } }} disabled={busy || isRecording || !sessionId} rows={2} placeholder="Type your message here…" className="min-h-[48px] min-w-0 flex-1 resize-none rounded-xl border border-slate-300 bg-white px-3 py-3 text-base outline-none placeholder:text-slate-400 focus:border-emerald-700 disabled:bg-slate-100 sm:text-sm" />
+              <button type="submit" disabled={!draft.trim() || busy || isRecording || !sessionId} className="min-h-[48px] rounded-xl bg-slate-900 px-4 py-3 text-sm font-semibold text-white hover:bg-slate-700 disabled:cursor-not-allowed disabled:opacity-40">Send</button>
+            </form>
+            <p className="mt-2 text-center text-[11px] text-slate-400">Microphone access and a configured Gnani STT key are required for voice input. Text chat works without microphone access.</p>
+          </div>
+        </section>
+
+        {view === "trade" && (
+          <section role="tabpanel" id="panel-trade" aria-labelledby="tab-trade" className="rounded-2xl border border-slate-200 bg-white p-4 shadow-sm">
+            <div className="flex flex-wrap items-center justify-between gap-3">
+              <h2 className="font-semibold text-slate-900">Your mandi trade</h2>
+              <div className="flex flex-wrap items-center justify-end gap-2">
+                <span className="break-all font-mono text-[11px] text-slate-400">{sessionId ?? "Starting…"}</span>
+                <button
+                  type="button"
+                  onClick={() => void shareBuyerLink()}
+                  disabled={!sessionId}
+                  className="min-h-[40px] rounded-lg bg-emerald-800 px-3 py-2 text-xs font-semibold text-white transition hover:bg-emerald-900 disabled:cursor-not-allowed disabled:opacity-40"
+                >
+                  Share with buyer
+                </button>
+              </div>
+            </div>
+            {buyerLink && (
+              <p className="mt-2 break-all text-xs leading-relaxed text-slate-600">
+                Buyer link: <span className="font-medium text-emerald-800">{buyerLink}</span>
+              </p>
+            )}
+            {shareMessage && (
+              <p role="status" aria-live="polite" className="mt-2 text-xs font-semibold text-emerald-700">
+                {shareMessage}
+              </p>
+            )}
+            <div className="mt-4">
+              <TradeSummary trade={trade} />
             </div>
           </section>
+        )}
 
-          <aside className="space-y-4">
+        {view === "connection" && (
+          <section role="tabpanel" id="panel-connection" aria-labelledby="tab-connection" className="space-y-4">
             <div className="rounded-2xl border border-slate-200 bg-white p-4 shadow-sm">
-              <div className="flex flex-wrap items-center justify-between gap-3">
-                <h2 className="font-semibold text-slate-900">Your mandi trade</h2>
-                <div className="flex flex-wrap items-center justify-end gap-2">
-                  <span className="font-mono text-[11px] text-slate-400">{sessionId ?? "Starting…"}</span>
-                  <button
-                    type="button"
-                    onClick={() => void shareBuyerLink()}
-                    disabled={!sessionId}
-                    className="rounded-lg bg-emerald-800 px-3 py-2 text-xs font-semibold text-white transition hover:bg-emerald-900 disabled:cursor-not-allowed disabled:opacity-40"
-                  >
-                    Share with buyer
-                  </button>
+              <h2 className="font-semibold text-slate-900">Connection</h2>
+              <div className="mt-3 flex flex-wrap items-center gap-2">
+                <span className={`inline-flex items-center gap-2 rounded-full px-3 py-1.5 text-xs font-semibold ${healthStatus === "online" ? "bg-emerald-100 text-emerald-800" : healthStatus === "offline" ? "bg-rose-100 text-rose-800" : "bg-slate-200 text-slate-600"}`}>
+                  <span className={`h-2 w-2 rounded-full ${healthStatus === "online" ? "bg-emerald-600" : healthStatus === "offline" ? "bg-rose-600" : "bg-slate-400"}`} />
+                  {healthStatus === "online" ? "Backend connected" : healthStatus === "offline" ? "Backend offline" : "Checking backend"}
+                </span>
+                <span className={`rounded-full px-3 py-1.5 text-xs font-semibold ${wsLive ? "bg-emerald-100 text-emerald-800" : "bg-slate-200 text-slate-600"}`}>
+                  {wsLive ? "Live sync on" : "Live sync reconnecting"}
+                </span>
+              </div>
+            </div>
+
+            <div className="rounded-2xl border border-slate-200 bg-white p-4 shadow-sm">
+              <h3 className="text-sm font-semibold text-slate-800">Voice status</h3>
+              <div className="mt-3 grid grid-cols-2 gap-2 sm:grid-cols-3">
+                <SmallStat label="Voice" value={voiceStatus} />
+                <SmallStat label="Microphone" value={isRecording ? (autoStopAvailable ? "Recording · auto-stop on silence" : "Recording · tap to stop") : "Not recording"} />
+                <SmallStat label="Playback" value={isSpeaking ? "Speaking" : "Silent"} />
+              </div>
+            </div>
+
+            <div className="rounded-2xl border border-slate-200 bg-white p-4 shadow-sm">
+              <h3 className="text-sm font-semibold text-slate-800">Latest response timing</h3>
+              {timings ? (
+                <div className="mt-3 grid grid-cols-2 gap-2 sm:grid-cols-4">
+                  <SmallStat label="STT" value={timings.stt == null ? "—" : `${timings.stt} ms`} />
+                  <SmallStat label="Assistant" value={timings.agent == null ? "—" : `${timings.agent} ms`} />
+                  <SmallStat label="TTS" value={timings.tts == null ? "—" : `${timings.tts} ms`} />
+                  <SmallStat label="Total" value={timings.total == null ? "—" : `${timings.total} ms`} />
                 </div>
-              </div>
-              {buyerLink && (
-                <p className="mt-2 break-all text-xs leading-relaxed text-slate-600">
-                  Buyer link: <span className="font-medium text-emerald-800">{buyerLink}</span>
-                </p>
+              ) : (
+                <p className="mt-2 text-sm text-slate-500">No response yet. Latency appears after your first message.</p>
               )}
-              {shareMessage && (
-                <p role="status" aria-live="polite" className="mt-2 text-xs font-semibold text-emerald-700">
-                  {shareMessage}
-                </p>
-              )}
-              <div className="mt-4">
-                <TradeSummary trade={trade} />
-              </div>
             </div>
 
             {health && (
-              <div className="rounded-2xl border border-slate-200 bg-white p-4 text-xs text-slate-600">
+              <div className="rounded-2xl border border-slate-200 bg-white p-4 text-xs text-slate-600 shadow-sm">
                 <h3 className="font-semibold text-slate-800">Service status</h3>
                 <div className="mt-3 grid grid-cols-2 gap-2">
                   <SmallStat label="Gnani voice service" value={health.gnani ? "Configured" : "Not configured"} />
@@ -1255,20 +1418,8 @@ export default function SaudaVaniPage() {
                 <p className="mt-3 leading-relaxed">Prototype only. It is not production-ready for real trading. A session ID is not user authentication. Any escrow shown here is simulated; actual money transferred is ₹0.</p>
               </div>
             )}
-
-            {timings && (
-              <div className="rounded-2xl border border-slate-200 bg-white p-4">
-                <h3 className="text-sm font-semibold text-slate-800">Latest response timing</h3>
-                <div className="mt-3 grid grid-cols-2 gap-2 sm:grid-cols-4">
-                  <SmallStat label="STT" value={timings.stt == null ? "—" : `${timings.stt} ms`} />
-                  <SmallStat label="Assistant" value={timings.agent == null ? "—" : `${timings.agent} ms`} />
-                  <SmallStat label="TTS" value={timings.tts == null ? "—" : `${timings.tts} ms`} />
-                  <SmallStat label="Total" value={timings.total == null ? "—" : `${timings.total} ms`} />
-                </div>
-              </div>
-            )}
-          </aside>
-        </div>
+          </section>
+        )}
 
         <footer className="mt-6 border-t border-slate-200 pt-4 text-center text-[11px] leading-relaxed text-slate-500">
           SaudaVani hackathon prototype · AGMARKNET values are reported daily market data, not live auction bids · Simulated escrow only · Actual money transferred: ₹0
