@@ -21,9 +21,17 @@ export default function BuyerHomePage() {
           <div className="grid h-11 w-11 place-items-center rounded-xl bg-emerald-800 text-xl font-bold text-white">
             S
           </div>
-          <div>
+          <div className="min-w-0">
             <h1 className="text-2xl font-bold">SaudaVani</h1>
             <p className="text-xs text-slate-500">Buyer deal review</p>
+            <div className="mt-1.5 flex flex-wrap items-center gap-x-2 gap-y-1">
+              <span className="inline-flex rounded-full border border-amber-300 bg-amber-100 px-2 py-0.5 text-[10px] font-bold tracking-[0.12em] text-slate-900">
+                DEMO MODE
+              </span>
+              <span className="text-[11px] leading-4 text-slate-500">
+                Demonstration only · No real money transferred
+              </span>
+            </div>
           </div>
         </header>
 

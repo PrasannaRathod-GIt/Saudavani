@@ -211,9 +211,21 @@ function BuyerDealPageContent() {
 
   const submittingRef = useRef(false);
   const requestSeqRef = useRef(0);
+  const playerRef = useRef<HTMLAudioElement | null>(null);
+    useEffect(() => {
+    return () => {
+      const player = playerRef.current;
 
-  // Fetches the buyer-safe deal view. Silent refreshes (from the live socket
-  // or after an action) never blank the page or surface a full-page error.
+      if (player) {
+        player.pause();
+        player.removeAttribute("src");
+        player.load();
+        playerRef.current = null;
+      }
+    };
+  }, []);
+
+  // Keep the last good deal visible during background refreshes.
   const loadDeal = useCallback(
     async (opts: { silent?: boolean; signal?: AbortSignal } = {}) => {
       const { silent = false, signal } = opts;
@@ -288,9 +300,7 @@ function BuyerDealPageContent() {
     return () => controller.abort();
   }, [sessionId, retryKey, loadDeal]);
 
-  // Live updates. Any socket message triggers a refetch of the buyer-safe
-  // endpoint, so the page never renders raw socket payloads (which could
-  // contain farmer-side data).
+  // Refetch the buyer-safe endpoint; never render raw socket payloads.
   useEffect(() => {
     if (!sessionId) return;
 
@@ -384,12 +394,67 @@ function BuyerDealPageContent() {
           return;
         }
 
-        setResponded({ version, accepted });
-        setActionNotice(
-          accepted
-            ? "Your acceptance has been sent."
-            : "Your rejection has been sent."
-        );
+                setResponded({ version, accepted });
+
+        const spokenText =
+          typeof body?.agent_text === "string"
+            ? body.agent_text
+            : accepted
+              ? "Your acceptance has been sent."
+              : "Your rejection has been sent.";
+
+        setActionNotice(spokenText);
+
+        const audioBase64 =
+          typeof body?.audio_base64 === "string"
+            ? body.audio_base64
+            : "";
+
+        if (audioBase64) {
+          const previousPlayer = playerRef.current;
+
+          if (previousPlayer) {
+            previousPlayer.pause();
+            previousPlayer.removeAttribute("src");
+            previousPlayer.load();
+          }
+
+          const mime =
+            typeof body.audio_mime_type === "string"
+              ? body.audio_mime_type
+              : "audio/wav";
+
+          const player = new Audio(
+            `data:${mime};base64,${audioBase64}`
+          );
+
+          // Same normal browser playback rate as the farmer page.
+          player.playbackRate = 1.0;
+
+          playerRef.current = player;
+
+          player.onended = () => {
+            if (playerRef.current === player) {
+              playerRef.current = null;
+            }
+          };
+
+          player.onerror = () => {
+            if (playerRef.current === player) {
+              playerRef.current = null;
+            }
+          };
+
+          // Audio failure must not undo a successful buyer action.
+          try {
+            await player.play();
+          } catch {
+            if (playerRef.current === player) {
+              playerRef.current = null;
+            }
+          }
+        }
+
         await loadDeal({ silent: true });
       } catch (err) {
         setActionError(
@@ -526,6 +591,14 @@ function BuyerDealPageContent() {
             <div className="min-w-0">
               <h1 className="truncate text-xl font-bold">SaudaVani</h1>
               <p className="text-xs text-slate-500">Buyer deal review</p>
+              <div className="mt-1.5 flex flex-wrap items-center gap-x-2 gap-y-1">
+                <span className="inline-flex rounded-full border border-amber-300 bg-amber-100 px-2 py-0.5 text-[10px] font-bold tracking-[0.12em] text-slate-900">
+                  DEMO MODE
+                </span>
+                <span className="text-[11px] leading-4 text-slate-500">
+                  Demonstration only · No real money transferred
+                </span>
+              </div>
             </div>
           </div>
 
@@ -548,6 +621,12 @@ function BuyerDealPageContent() {
 
             <p className="mt-2 break-all font-mono text-xs text-slate-500">
               Session: {deal.session_id}
+            </p>
+            <p className="mt-3 inline-flex flex-wrap items-center gap-x-1 rounded-lg border border-amber-200 bg-amber-50 px-3 py-2 text-xs leading-relaxed text-slate-700">
+              <span className="font-bold uppercase tracking-wide text-slate-900">
+                Simulated escrow
+              </span>
+              <span>· No funds are held or transferred.</span>
             </p>
           </div>
 
@@ -784,8 +863,8 @@ function BuyerDealPageContent() {
 
             <p className="text-center text-xs leading-relaxed text-slate-500">
               Prototype only. A deal is locked only when both parties confirm
-              the same offer version. Simulated escrow only; actual money
-              transferred: ₹0.
+              the same offer version. Escrow is simulated; no funds are held or
+              transferred. Actual money transferred: ₹0.
             </p>
           </div>
         </section>

@@ -20,6 +20,8 @@ const API_BASE = (process.env.NEXT_PUBLIC_API_URL ?? "http://127.0.0.1:8000").re
 const WS_BASE = API_BASE.replace(/^http/i, "ws");
 const REQUEST_TIMEOUT_MS = 180_000;
 const SESSION_STORAGE_KEY = "saudavani_session_id";
+const SPEAK_NOTICES = false; // true = also speak buyer notices with the phone's own voice
+const SILENT_WAV = "data:audio/wav;base64,UklGRnQAAABXQVZFZm10IBAAAAABAAEAQB8AAIA+AAACABAAZGF0YVAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAA==";
 
 const LANGUAGE_OPTIONS = [
   { value: "mr-IN", label: "मराठी · Marathi" },
@@ -715,6 +717,8 @@ export default function SaudaVaniPage() {
   const [wsLive, setWsLive] = useState(false);
   const [timings, setTimings] = useState<Timings | null>(null);
   const playerRef = useRef<HTMLAudioElement | null>(null);
+  const audioElRef = useRef<HTMLAudioElement | null>(null);
+  const audioUnlockedRef = useRef(false);
   const abortRef = useRef<AbortController | null>(null);
   const inFlightRef = useRef(false);
   const logRef = useRef<HTMLDivElement | null>(null);
@@ -802,7 +806,7 @@ export default function SaudaVaniPage() {
               ...current,
               { id: newSessionId(), role: "agent", text: noticeText },
             ]);
-            speakInBrowserRef.current(noticeText, languageRef.current);
+            if (SPEAK_NOTICES) speakInBrowserRef.current(noticeText, languageRef.current);
             if (message.event === "buyer_accepted_locked") {
               lockNoticeSessionRef.current = sessionId;
             }
@@ -840,7 +844,7 @@ if (!noticeReceived && !message.agent_text) {
   if (buyerRejected || buyerAcceptedAwaitingFarmer) {
     const text = buyerResponseMessage(buyerRejected ? "rejected" : "accepted", nextTrade, languageRef.current);
     setMessages((current) => [...current, { id: newSessionId(), role: "agent", text }]);
-    speakInBrowserRef.current(text, languageRef.current);
+    if (SPEAK_NOTICES) speakInBrowserRef.current(text, languageRef.current);
   }
 }
 
@@ -896,12 +900,41 @@ if (!noticeReceived && !message.agent_text) {
     if (typeof window !== "undefined" && "speechSynthesis" in window) window.speechSynthesis.cancel();
     const player = playerRef.current;
     if (player) {
+      player.onended = null;
+      player.onerror = null;
       player.pause();
       player.removeAttribute("src");
       player.load();
       playerRef.current = null;
     }
   }, []);
+
+  const getPlayer = useCallback(() => {
+    if (!audioElRef.current) {
+      const el = new Audio();
+      el.preload = "auto";
+      el.setAttribute("playsinline", "");
+      audioElRef.current = el;
+    }
+    return audioElRef.current;
+  }, []);
+
+  // Phones only let an audio element play replies after it was started by a tap, so unlock it once.
+  const unlockAudio = useCallback(() => {
+    if (audioUnlockedRef.current) return;
+    const el = getPlayer();
+    el.onended = null;
+    el.onerror = null;
+    el.src = SILENT_WAV;
+    el.volume = 1;
+    const started = el.play();
+    if (started) {
+      started.then(() => {
+        if (!playerRef.current) el.pause();
+        audioUnlockedRef.current = true;
+      }).catch(() => { /* tried again on the next tap */ });
+    }
+  }, [getPlayer]);
 
   useEffect(() => {
     return () => {
@@ -962,6 +995,7 @@ if (!noticeReceived && !message.agent_text) {
 
   const sendTurn = useCallback(async (input: { transcript?: string; audio?: Blob }) => {
     if (!sessionId || inFlightRef.current) return;
+    unlockAudio();
     const transcript = input.transcript?.trim();
     if (!transcript && !input.audio) return;
 
@@ -1052,7 +1086,12 @@ if (!noticeReceived && !message.agent_text) {
 
       if (data.audio_base64) {
         const mime = data.audio_mime_type || "audio/wav";
-        const player = new Audio(`data:${mime};base64,${data.audio_base64}`);
+        const player = getPlayer();
+        player.onended = null;
+        player.onerror = null;
+        player.pause();
+        player.src = `data:${mime};base64,${data.audio_base64}`;
+        player.volume = 1;
         playerRef.current = player;
         player.onended = () => {
           playerRef.current = null;
@@ -1087,7 +1126,7 @@ if (!noticeReceived && !message.agent_text) {
       inFlightRef.current = false;
       abortRef.current = null;
     }
-  }, [language, sessionId, speakInBrowser, stopPlayback, syncSessionState]);
+  }, [language, sessionId, speakInBrowser, stopPlayback, syncSessionState, getPlayer, unlockAudio]);
 
   const handleRecordedAudio = useCallback(async (blob: Blob, mimeType: string) => {
     const audioBlob = blob.type ? blob : new Blob([blob], { type: mimeType });
@@ -1112,10 +1151,11 @@ if (!noticeReceived && !message.agent_text) {
     } else if (phase === "idle" && recState !== "processing") {
       setError(null);
       setNotice(null);
+      unlockAudio();
       stopPlayback();
       void start();
     }
-  }, [isRecording, phase, recState, start, stop, stopPlayback]);
+  }, [isRecording, phase, recState, start, stop, stopPlayback, unlockAudio]);
 
   const submitText = (event: FormEvent<HTMLFormElement>) => {
     event.preventDefault();

@@ -287,7 +287,14 @@ def _is_any_market(value: Any) -> bool:
     toks = normalize_text(str(value or "")).split()
     core = [t for t in toks if t not in _MARKET_FILLER_TOKENS]
     return bool(core) and len(toks) <= 6 and all(t in _ANY_MARKET_TOKENS for t in core)
+_ANY_MARKET_PHRASES = [
+    "कौन सी भी", "कौनसी भी", "कोई भी", "कोणतीही", "कोणतिही", "कुठलीही", "कोई भी मंडी",
+    "koi bhi", "kaun si bhi", "kaunsi bhi", "konti hi", "kontihi", "any mandi", "any market", "any apmc",
+]
 
+def _says_any_market(text: str) -> bool:
+    n = normalize_text(text)
+    return any(normalize_text(p) in n for p in _ANY_MARKET_PHRASES)
 configure_price_helpers(
     commodity_terms_fn=commodity_terms,
     is_any_market_fn=_is_any_market,
@@ -422,7 +429,16 @@ def is_accept(text: str) -> bool:
         _tok_in(tokens, _ACCEPT_POSITIVE)
         and len(tokens) <= 14
     )
-
+_REJECT_PHRASES = [
+    "reject", "rejected", "not accept", "dont accept", "don't accept",
+    "nahi chalega", "nahin chalega", "nahi manunga", "nahi manzoor",
+    "manzoor nahi", "manjur nahi", "nakar", "nakara", "nakarla",
+    "naamanjur", "namanjur", "manya nahi", "nahi chalel", "naka chalel",
+    "inkar", "इनकार", "अस्वीकार", "नाकार", "नाकारा", "नामंजूर",
+    "नामंज़ूर", "मंजूर नहीं", "मंज़ूर नहीं", "मान्य नाही",
+    "नहीं चलेगा", "नाही चालेल", "नहीं मानूंगा", "नहीं मानूँगा",
+    "नको हा भाव", "ये भाव नहीं"
+]
 def is_reject(text: str) -> bool:
     return _phrase_in(normalize_text(text), _REJECT_PHRASES)
 
@@ -755,7 +771,7 @@ def _extract_waiting_answer(s: dict[str, Any], text: str) -> None:
         found = find_market(text)
         if found:
             _set_market(s, found)
-        elif _is_any_market(text) or skip_answer(text) or tokens & _MARKET_SKIP_TOKENS:
+        elif _is_any_market(text) or _says_any_market(text) or skip_answer(text) or tokens & _MARKET_SKIP_TOKENS:
             s["market"], s["market_skipped"] = None, True
             s["market_retry"] = 0
             _invalidate_price(s)
@@ -1609,11 +1625,17 @@ async def _maybe_handle_info(s: dict[str, Any], text: str, lang: str, market_for
     info_clauses: list[tuple[str, str]] = []
     other: list[str] = []
     for clause in _split_clauses(text):
+        # While we're waiting for the mandi name, "any mandi / koi bhi / kaun si bhi" or a real mandi name is an ANSWER
+        if s.get("waiting_for") == "market" and (
+            _is_any_market(clause) or find_market(clause) or _says_any_market(clause)
+        ):
+            other.append(clause)
+            continue
         kind = _classify_info(s, clause, strict)
         if kind == "general":
             toks = normalize_text(clause).split()
             if (len(toks) <= 4 or re.search(r"\d", clause)) and _answers_pending(s, clause, lang, market_form, district_form):
-                kind = None  # a short reply that fills the pending field ("Lokwan kya?") is an answer, not a question
+                kind = None
         if kind:
             info_clauses.append((clause, kind))
         else:
@@ -2182,6 +2204,63 @@ def _tts_failure(error: str, http_status: Optional[int] = None) -> dict[str, Any
 _GNANI_TTS_LANGUAGE_CODES = {"mr": "mr-IN", "hi": "hi-IN", "en": "en-IN"}  # documented `language` values; "hi-en" = Hinglish
 
 
+import array
+import io
+import math
+import sys
+import wave
+
+try:
+    TTS_SPEED = min(1.2, max(0.7, float(os.getenv("GNANI_TTS_SPEED", "0.95"))))
+except ValueError:
+    TTS_SPEED = 0.95
+
+_TTS_TARGET_RMS = 3700.0   # about -19 dBFS: the same speech level for every reply
+_TTS_PEAK_LIMIT = 29000.0  # never push a peak above about -1 dBFS
+_TTS_GATE = 400            # ignore samples quieter than this when measuring the speech level
+_TTS_MIN_GAIN, _TTS_MAX_GAIN = 0.25, 4.0
+_TTS_LEAD_MS, _TTS_TAIL_MS = 200, 120  # silence so phone audio routes wake up before the first word
+
+
+def _prepare_tts_wav(audio_bytes: bytes) -> bytes:
+    """Give every spoken reply the same loudness and add a short silent lead-in/out.
+    Returns the input unchanged on any problem (never breaks voice output)."""
+    try:
+        if not audio_bytes.startswith(b"RIFF"):
+            return audio_bytes
+        with wave.open(io.BytesIO(audio_bytes), "rb") as src:
+            channels, width, rate = src.getnchannels(), src.getsampwidth(), src.getframerate()
+            raw = src.readframes(src.getnframes())
+        if width != 2 or not raw or channels < 1 or rate < 8000:
+            return audio_bytes
+        samples = array.array("h")
+        samples.frombytes(raw[: len(raw) - (len(raw) % 2)])
+        if sys.byteorder == "big":
+            samples.byteswap()
+        voiced = [abs(v) for v in samples if abs(v) > _TTS_GATE]
+        gain = 1.0
+        if len(voiced) >= rate // 10:  # almost silent audio is never amplified
+            rms = math.sqrt(sum(v * v for v in voiced) / len(voiced))
+            gain = min(_TTS_TARGET_RMS / rms, _TTS_PEAK_LIMIT / max(voiced))
+            gain = max(_TTS_MIN_GAIN, min(_TTS_MAX_GAIN, gain))
+        if abs(gain - 1.0) > 0.02:
+            samples = array.array("h", (max(-32768, min(32767, int(v * gain))) for v in samples))
+        lead = array.array("h", [0]) * (int(rate * _TTS_LEAD_MS / 1000) * channels)
+        tail = array.array("h", [0]) * (int(rate * _TTS_TAIL_MS / 1000) * channels)
+        combined = lead + samples + tail
+        if sys.byteorder == "big":
+            combined.byteswap()
+        out = io.BytesIO()
+        with wave.open(out, "wb") as dst:
+            dst.setnchannels(channels)
+            dst.setsampwidth(2)
+            dst.setframerate(rate)
+            dst.writeframes(combined.tobytes())
+        return out.getvalue()
+    except Exception:  # noqa: BLE001
+        return audio_bytes
+
+
 async def synthesize_voice(text: str, language: str, voice: Optional[str] = None, hinglish: bool = False) -> dict[str, Any]:
     if not GNANI_API_KEY:
         return {"status": "unavailable", "audio_base64": "", "audio_mime_type": "audio/wav", "source": "none", "error": "GNANI_API_KEY is not configured"}
@@ -2199,7 +2278,7 @@ async def synthesize_voice(text: str, language: str, voice: Optional[str] = None
 
     # Slightly faster speech for Gnani Timbre v2.5
     if model == "timbre-v2.5":
-        payload["speed"] = 1.05
+        payload["speed"] = TTS_SPEED
 
     try:
         async with httpx.AsyncClient(timeout=45.0, trust_env=False) as client:
@@ -2228,6 +2307,8 @@ async def synthesize_voice(text: str, language: str, voice: Optional[str] = None
             mime = body.get("mime_type") or body.get("content_type") or body.get("audio_mime_type") or content_type or "audio/wav"
         if not audio_bytes:
             raise RuntimeError("Gnani TTS returned empty audio")
+        # Same loudness for every reply + soft start (off the event loop; raw audio is kept on any problem).
+        audio_bytes = await asyncio.to_thread(_prepare_tts_wav, audio_bytes)
         return {"status": "success", "audio_base64": base64.b64encode(audio_bytes).decode("ascii"), "audio_mime_type": mime, "source": "gnani",
                 "audio_size_bytes": len(audio_bytes), "http_status": response.status_code}
     except Exception as exc:  # a TTS failure must never break the conversation turn
@@ -2451,7 +2532,41 @@ def _deal_response(s: dict[str, Any], party: str, message: str) -> dict[str, Any
         out["locked_deal"] = state.get("locked_deal")
         out["escrow"] = state.get("escrow") if party == "buyer" else state.get("simulated_escrow")
     return out
+def _buyer_confirmation_voice_text(lang: str, accepted: bool, locked: bool) -> str:
+    lang = (lang or "mr").lower()
+    lang = (
+        "hinglish" if "hinglish" in lang
+        else "mr" if lang.startswith("mr")
+        else "hi" if lang.startswith("hi")
+        else "en"
+    )
 
+    if lang == "mr":
+        if not accepted:
+            return "तुम्ही हा प्रस्ताव नाकारला आहे. आता नवीन प्रस्तावाची आवश्यकता आहे."
+        if locked:
+            return "शेतकरी आणि खरेदीदार दोघांनीही याच प्रस्तावाला पुष्टी दिली आहे. सौदा निश्चित झाला आहे. हा फक्त डेमो आहे; प्रत्यक्ष पैसे हस्तांतरित झालेले नाहीत."
+        return "तुमची स्वीकृती नोंदवली आहे. सौदा पूर्ण करण्यासाठी शेतकऱ्याची पुष्टी बाकी आहे."
+
+    if lang == "hi":
+        if not accepted:
+            return "आपने यह प्रस्ताव अस्वीकार कर दिया है। अब नए प्रस्ताव की आवश्यकता है।"
+        if locked:
+            return "किसान और खरीदार दोनों ने इसी प्रस्ताव की पुष्टि कर दी है। सौदा पक्का हो गया है। यह केवल डेमो है; वास्तविक पैसे ट्रांसफर नहीं हुए हैं।"
+        return "आपकी स्वीकृति दर्ज हो गई है। सौदा पूरा करने के लिए किसान की पुष्टि बाकी है।"
+
+    if lang == "hinglish":
+        if not accepted:
+            return "Aapne yeh offer reject kar diya hai. Ab naya offer zaroori hai."
+        if locked:
+            return "Farmer aur buyer dono ne same offer confirm kar diya hai. Deal lock ho gayi hai. Yeh sirf demo hai; actual money transfer nahi hua hai."
+        return "Aapka acceptance record ho gaya hai. Deal complete hone ke liye farmer ki confirmation baaki hai."
+
+    if not accepted:
+        return "You rejected this offer. A new offer is required."
+    if locked:
+        return "Both parties confirmed the same offer. The deal is locked. This is a demo; no real money was transferred."
+    return "Your acceptance has been recorded. The farmer's confirmation is still required."
 
 def _require_existing_session(session_id: str) -> None:
     if peek_session(session_id) is None:
@@ -2777,6 +2892,7 @@ async def confirm_deal(session_id: str, data: DealConfirmationIn) -> dict[str, A
         save_session(s)
         response = _deal_response(s, data.party, message)
     await broadcast_session(session_id, s, notice)
+
     return response
 
 
